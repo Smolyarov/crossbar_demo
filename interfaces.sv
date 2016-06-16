@@ -1,3 +1,6 @@
+`ifndef INTERFACES
+`define INTERFACES
+
 interface master_if #(N=4) (input logic clk, rst);
   logic req[N], ack[N], cmd[N], resp[N];
   logic [31:0] addr[N];
@@ -9,7 +12,7 @@ interface master_if #(N=4) (input logic clk, rst);
 
   modport tb (input clk, rst, ack, resp, rdata,
 	      output req, cmd, addr, wdata);
-endinterface
+endinterface // master_if
 
 interface slave_if #(N=4);
   logic 	     req[N], ack[N], cmd[N], resp[N];
@@ -23,4 +26,6 @@ interface slave_if #(N=4);
   modport tb(input req, cmd, addr, wdata,
 	     output ack, resp, rdata);
 
-endinterface  
+endinterface // slave_if
+
+`endif

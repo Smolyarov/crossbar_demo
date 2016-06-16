@@ -21,7 +21,7 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
   struct 			{
     logic 			ack, resp;
     logic [31:0] 		rdata;
-    } try[MASTERS][SLAVES];
+  } try[MASTERS][SLAVES];
   
 
   
@@ -30,12 +30,16 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 
     
     if (mif.rst) begin
-      foreach (rr_cnt[i]) rr_cnt[i] <= 0;
-      foreach (tx_queue[i,j]) tx_queue[i][j].tx_valid <= 0;
-      foreach (try[i,j]) begin
-	try[i][j].ack <= 0;
-	try[i][j].resp <= 0;
-      end
+      for (int i=0; i<SLAVES; i++) rr_cnt[i] <= 0;
+
+      for (int i=0; i<SLAVES; i++)
+	for (int j=0; j<MASTERS; j++) tx_queue[i][j].tx_valid <= 0;
+
+      for (int i=0; i<MASTERS; i++)
+	for (int j=0; j<SLAVES; j++) begin
+	  try[i][j].ack <= 0;
+	  try[i][j].resp <= 0;
+	end
       
       for (int i=0; i<MASTERS; i++) begin
 	mif.ack[i] <= 0;
@@ -58,7 +62,7 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
       
 
       
-      foreach (mif.req[i]) begin // store master requests
+      for (int i=0; i<MASTERS; i++) begin // store master requests
 	
 	logic [$clog2(SLAVES)-1:0] slave_addr;
 	slave_addr = mif.addr[i][31:31-$clog2(SLAVES)+1];
@@ -71,14 +75,14 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 				       cmd : mif.cmd[i],
 				       addr : mif.addr[i][31-$clog2(SLAVES):0]};  
 	end 
-      end // foreach (mif.req[i])
+      end // for (int i=0; i<MASTERS; i++)
 
       
 
-      foreach (sif.req[i]) begin // slave operations
+      for (int i=0; i<SLAVES; i++) begin // slave operations
 	// defaults
 	sif.req[i] <= 0;
-	foreach (try[j]) begin
+	for (int j=0; j<MASTERS; j++) begin
 	  try[j][i].ack <= 0;
 	  try[j][i].resp <= 0;
 	  try[j][i].rdata <= 0;
@@ -115,9 +119,9 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 	      
 	      // update rr_cnt (set to next non-empty transaction) round-robin
 	      priority case (1'b1)
-		tx_queue[i][rr_cnt[i]+1].tx_valid: rr_cnt[i] <= rr_cnt[i]+1;
-		tx_queue[i][rr_cnt[i]+2].tx_valid: rr_cnt[i] <= rr_cnt[i]+2;
-		tx_queue[i][rr_cnt[i]+3].tx_valid: rr_cnt[i] <= rr_cnt[i]+3;
+		tx_queue[i][rr_cnt[i]+1].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(1);
+		tx_queue[i][rr_cnt[i]+2].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(2);
+		tx_queue[i][rr_cnt[i]+3].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(3);
 		default: rr_cnt[i] <= rr_cnt[i];
 	      endcase // priority case (1'b1)
 	      
@@ -126,19 +130,19 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 	  end // case: WAIT_RESP
 	  
 	endcase // unique case (sif_state[i])	
-      end // foreach (sif.req[i])
+      end // for (int i=0; i<SLAVES; i++)
 
 
       
-      foreach (mif.ack[i]) begin // drive slave responses to masters
+      for (int i=0; i<MASTERS; i++) begin // drive slave responses to masters
 	// defaults
 	mif.ack[i] <= 0;
 	mif.resp[i] <= 0;
 
-	foreach (try[,j])
+	for (int j=0; j<SLAVES; j++)
 	  if (try[i][j].ack) mif.ack[i] <= 1'b1;
 
-	foreach (try[,j])
+	for (int j=0; j<SLAVES; j++)
 	  if (try[i][j].resp) begin
 	    mif.resp[i] <= 1'b1;
 	    mif.rdata[i] <= try[i][j].rdata;
