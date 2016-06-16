@@ -8,61 +8,34 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
     logic [31:0] 		data;
     logic 			cmd; // 0-read, 1-write
   } tx_type;
-  
+
+  // transaction cells
   tx_type tx_queue[SLAVES][MASTERS]; // [dst][src]
 
   enum 				{READY, WAIT_ACK, WAIT_RESP} sif_state[SLAVES];
 
-  // current and next master transaction pointers for each slave
-  logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES], rr_next[SLAVES];
+  // current transaction pointer for each slave
+  logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES];
   
-
-  //----------Slave-to-master priority mux----------------
-  struct {
-    logic ack, resp;
-    logic [31:0] rdata;
+  // table of slave responses for priority mux
+  struct 			{
+    logic 			ack, resp;
+    logic [31:0] 		rdata;
     } try[MASTERS][SLAVES];
   
-  always_comb begin
-    foreach (sif_mux_out[i]) begin
-      sif_mux_out[i].ack <= 0; // defaults
-      sif_mux_out[i].resp <= 0;
-    end
 
-    foreach (rr_cnt[i])
-      foreach (rr_cnt[j])
-	if (rr_cnt[i]==rr_cnt[j]) begin // several slaves to one master
-	  
-	  if (sif.ack[i] && sif.ack[j])
-	    sif_mux_out[rr_cnt[i]].ack <= (i<j) ? sif.ack[i] : sif.ack[j];
-	  
-	  if (sif.resp[i] && sif.resp[j]) begin
-	    sif_mux_out[rr_cnt[i]].resp <= (i<j) ? sif.resp[i] : sif.resp[j];
-	    sif_mux_out[rr_cnt[i]].rdata <= (i<j) ? sif.rdata[i] : sif.rdata[j];
-	  end
-	  
-	end // if (rr_cnt[i]==rr_cnt[j])
-    
-  end // always_comb
-  //----------------------------------------------
-  
-  
-  /*
-  always_comb begin // determine next non-empty transaction for each slave
-    foreach (rr_cnt[i])
-      priority case (1'b1)
-	tx_queue[i][rr_cnt[i]+1]: rr_next[i] <= rr_cnt[i]+1;
-	tx_queue[i][rr_cnt[i]+2]: rr_next[i] <= rr_cnt[i]+2;
-	tx_queue[i][rr_cnt[i]+3]: rr_next[i] <= rr_cnt[i]+3;
-	tx_queue[i][rr_cnt[i]+1]: rr_next[i] <= rr_cnt[i]+1;
-      endcase // priority case (1'b1)
-  end
-  */
   
   always_ff @(posedge mif.clk) begin
+
+
+    
     if (mif.rst) begin
       rr_cnt <= 0;
       foreach (tx_queue[i,j]) tx_queue[i][j].tx_valid <= 0;
+      foreach (try[i,j]) begin
+	try[i][j].ack <= 0;
+	try[i][j].resp <= 0;
+      end
       
       for (int i=0; i<MASTERS; i++) begin
 	mif.ack[i] <= 0;
@@ -78,8 +51,12 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 	sif.wdata[i] <= 0;
       end
     end // if (mif.rst)
+
+    
     
     else begin
+      
+
       
       foreach (mif.req[i]) begin // store master requests
 	
@@ -96,11 +73,15 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 	end 
       end // foreach (mif.req[i])
 
+      
+
       foreach (sif.req[i]) begin // slave operations
 	// defaults
 	sif.req[i] <= 0;
 	foreach (try[j]) begin
-	  try[j][i]
+	  try[j][i].ack <= 0;
+	  try[j][i].resp <= 0;
+	  try[j][i].rdata <= 0;
 	end
 	
 	unique case (sif_state[i]) // slave FSMs
@@ -127,12 +108,49 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 	  end
 	  
 	  WAIT_RESP: begin
-	  end
-	endcase // unique case (sif_state[i])
+	    if (sif.resp[i]) begin
+	      try[rr_cnt[i]][i].resp <= 1'b1;
+	      try[rr_cnt[i]][i].rdata <= sif.rdata[i];
+	      sif_state[i] <= READY;
+	      
+	      // update rr_cnt (set to next non-empty transaction) round-robin
+	      priority case (1'b1)
+		tx_queue[i][rr_cnt[i]+1].tx_valid: rr_cnt[i] <= rr_cnt[i]+1;
+		tx_queue[i][rr_cnt[i]+2].tx_valid: rr_cnt[i] <= rr_cnt[i]+2;
+		tx_queue[i][rr_cnt[i]+3].tx_valid: rr_cnt[i] <= rr_cnt[i]+3;
+		default: rr_cnt[i] <= rr_cnt[i];
+	      endcase // priority case (1'b1)
+	      
+	    end // if (sif.resp[i])
+	    
+	  end // case: WAIT_RESP
+	  
+	endcase // unique case (sif_state[i])	
       end // foreach (sif.req[i])
+
+
+      
+      foreach (mif.ack[i]) begin // drive slave responses to masters
+	// defaults
+	mif.ack[i] <= 0;
+	mif.resp[i] <= 0;
+
+	foreach (try[,j])
+	  if (try[i,j].ack) mif.ack[i] <= 1'b1;
+
+	foreach (try[,j])
+	  if (try[i,j].resp) begin
+	    mif.resp[i] <= 1'b1;
+	    mif.rdata[i] <= try[i,j].rdata;
+	    break; // if more than 1 simultaneous resp, first one is passed
+	  end
+	
+      end // foreach (mif.ack[i])
+
+      
       
     end // else: !if(mif.rst)
-       
+    
   end // always_ff @ (posedge mif.clk)
   
 endmodule
