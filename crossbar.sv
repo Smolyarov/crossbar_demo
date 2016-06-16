@@ -30,7 +30,7 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 
     
     if (mif.rst) begin
-      rr_cnt <= 0;
+      foreach (rr_cnt[i]) rr_cnt[i] <= 0;
       foreach (tx_queue[i,j]) tx_queue[i][j].tx_valid <= 0;
       foreach (try[i,j]) begin
 	try[i][j].ack <= 0;
@@ -136,12 +136,12 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 	mif.resp[i] <= 0;
 
 	foreach (try[,j])
-	  if (try[i,j].ack) mif.ack[i] <= 1'b1;
+	  if (try[i][j].ack) mif.ack[i] <= 1'b1;
 
 	foreach (try[,j])
-	  if (try[i,j].resp) begin
+	  if (try[i][j].resp) begin
 	    mif.resp[i] <= 1'b1;
-	    mif.rdata[i] <= try[i,j].rdata;
+	    mif.rdata[i] <= try[i][j].rdata;
 	    break; // if more than 1 simultaneous resp, first one is passed
 	  end
 	
