@@ -12,9 +12,41 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
   tx_type tx_queue[SLAVES][MASTERS]; // [dst][src]
 
   enum 				{READY, WAIT_ACK, WAIT_RESP} sif_state[SLAVES];
-  
-  logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES], rr_next[SLAVES];
 
+  // current and next master transaction pointers for each slave
+  logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES], rr_next[SLAVES];
+  
+
+  //----------Slave-to-master priority mux----------------
+  struct {
+    logic ack, resp;
+    logic [31:0] rdata;
+    } try[MASTERS][SLAVES];
+  
+  always_comb begin
+    foreach (sif_mux_out[i]) begin
+      sif_mux_out[i].ack <= 0; // defaults
+      sif_mux_out[i].resp <= 0;
+    end
+
+    foreach (rr_cnt[i])
+      foreach (rr_cnt[j])
+	if (rr_cnt[i]==rr_cnt[j]) begin // several slaves to one master
+	  
+	  if (sif.ack[i] && sif.ack[j])
+	    sif_mux_out[rr_cnt[i]].ack <= (i<j) ? sif.ack[i] : sif.ack[j];
+	  
+	  if (sif.resp[i] && sif.resp[j]) begin
+	    sif_mux_out[rr_cnt[i]].resp <= (i<j) ? sif.resp[i] : sif.resp[j];
+	    sif_mux_out[rr_cnt[i]].rdata <= (i<j) ? sif.rdata[i] : sif.rdata[j];
+	  end
+	  
+	end // if (rr_cnt[i]==rr_cnt[j])
+    
+  end // always_comb
+  //----------------------------------------------
+  
+  
   /*
   always_comb begin // determine next non-empty transaction for each slave
     foreach (rr_cnt[i])
@@ -65,30 +97,42 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
       end // foreach (mif.req[i])
 
       foreach (sif.req[i]) begin // slave operations
-	sif.req[i] <= 0; // default
+	// defaults
+	sif.req[i] <= 0;
+	foreach (try[j]) begin
+	  try[j][i]
+	end
 	
-	unique case (sif_state[i])
+	unique case (sif_state[i]) // slave FSMs
 	  READY: begin
 	    tx_type tx;
 	    tx = tx_queue[i][rr_cnt[i]];
 	    
 	    if (tx.tx_valid) begin
-	      sif.req[i] <= 1'b1;
+ 	      sif.req[i] <= 1'b1;
 	      sif.cmd[i] <= tx.cmd;
 	      sif.addr[i] <= tx.addr;
 	      if (tx.cmd) sif.wdata[i] <= tx.data; // write
+	      sif_state[i] <= WAIT_ACK;
 	      
-	      tx_queue[i][rr_cnt[i]].tx_valid <= 0; // erase transaction
+	      tx_queue[i][rr_cnt[i]].tx_valid <= 0; // erase transaction 
+	    end
+	  end // case: READY
+	  
+	  WAIT_ACK: begin
+	    if (sif.ack[i]) begin
+	      try[rr_cnt[i]][i].ack <= 1'b1;
+	      sif_state[i] <= WAIT_RESP;
 	    end
 	  end
-	  WAIT_ACK:;
-	  WAIT_RESP:;
-	endcase
-      end
+	  
+	  WAIT_RESP: begin
+	  end
+	endcase // unique case (sif_state[i])
+      end // foreach (sif.req[i])
       
-    end
-    
-    
+    end // else: !if(mif.rst)
+       
   end // always_ff @ (posedge mif.clk)
   
 endmodule
