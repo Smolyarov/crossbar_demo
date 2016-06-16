@@ -1,16 +1,16 @@
 `ifndef INTERFACES
-`define INTERFACES
+  `define INTERFACES
 
-interface master_if #(N=4) (input logic clk, rst);
+interface master_if #(N=4);
   logic req[N], ack[N], cmd[N], resp[N];
   logic [31:0] addr[N];
   logic [31:0] wdata[N];
   logic [31:0] rdata[N];
 
-  modport crossbar(input clk, rst, req, cmd, addr, wdata,
+  modport crossbar(input req, cmd, addr, wdata,
 		   output ack, resp, rdata);
 
-  modport tb (input clk, rst, ack, resp, rdata,
+  modport tb (input ack, resp, rdata,
 	      output req, cmd, addr, wdata);
 endinterface // master_if
 

@@ -1,6 +1,12 @@
 `include "interfaces.sv"
 
-module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossbar sif);
+module crossbar
+  #(MASTERS=4, SLAVES=4)
+  (
+   master_if.crossbar mif,
+   slave_if.crossbar sif,
+   input logic clk, rst
+   );
   
   typedef struct {
     logic 	 tx_valid;
@@ -25,11 +31,11 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
   
 
   
-  always_ff @(posedge mif.clk) begin
+  always_ff @(posedge clk) begin
 
 
     
-    if (mif.rst) begin
+    if (rst) begin
       for (int i=0; i<SLAVES; i++) rr_cnt[i] <= 0;
 
       for (int i=0; i<SLAVES; i++)
@@ -54,7 +60,7 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 	sif.addr[i] <= 0;
 	sif.wdata[i] <= 0;
       end
-    end // if (mif.rst)
+    end // if (rst)
 
     
     
@@ -153,8 +159,8 @@ module crossbar #(MASTERS=4, SLAVES=4) (master_if.crossbar mif, slave_if.crossba
 
       
       
-    end // else: !if(mif.rst)
+    end // else: !if(rst)
     
-  end // always_ff @ (posedge mif.clk)
+  end // always_ff @ (posedge clk)
   
 endmodule
