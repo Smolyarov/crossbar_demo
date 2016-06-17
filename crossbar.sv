@@ -18,10 +18,20 @@ module crossbar
   // transaction cells
   tx_type tx_queue[SLAVES][MASTERS]; // [dst][src]
 
-  enum 				{READY, WAIT_ACK, WAIT_RESP} sif_state[SLAVES];
+  enum logic[1:0] {READY, WAIT_ACK, WAIT_RESP} sif_state[SLAVES];
 
   // current transaction pointer for each slave
   logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES];
+
+  // set round-robin to next non-empty transaction
+  function void update_rr (input int i); 
+    priority case (1'b1)
+      tx_queue[i][rr_cnt[i]+1].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(1);
+      tx_queue[i][rr_cnt[i]+2].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(2);
+      tx_queue[i][rr_cnt[i]+3].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(3);
+      default: rr_cnt[i] <= rr_cnt[i];
+    endcase // priority case (1'b1)
+  endfunction
   
   // table of slave responses for priority mux
   struct 			{
@@ -113,24 +123,23 @@ module crossbar
 	  WAIT_ACK: begin
 	    if (sif.ack[i]) begin
 	      try[rr_cnt[i]][i].ack <= 1'b1;
-	      sif_state[i] <= WAIT_RESP;
-	    end
-	  end
+	      
+	      // if write, then we are done, if read, wait for response
+	      if (tx_queue[i][rr_cnt[i]].cmd) begin
+		sif_state[i] <= READY;
+		update_rr(i);
+	      end
+	      else sif_state[i] <= WAIT_RESP;
+	    end // if (sif.ack[i])
+
+	  end // case: WAIT_ACK
 	  
 	  WAIT_RESP: begin
 	    if (sif.resp[i]) begin
 	      try[rr_cnt[i]][i].resp <= 1'b1;
 	      try[rr_cnt[i]][i].rdata <= sif.rdata[i];
 	      sif_state[i] <= READY;
-	      
-	      // update rr_cnt (set to next non-empty transaction) round-robin
-	      priority case (1'b1)
-		tx_queue[i][rr_cnt[i]+1].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(1);
-		tx_queue[i][rr_cnt[i]+2].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(2);
-		tx_queue[i][rr_cnt[i]+3].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(3);
-		default: rr_cnt[i] <= rr_cnt[i];
-	      endcase // priority case (1'b1)
-	      
+	      update_rr(i);
 	    end // if (sif.resp[i])
 	    
 	  end // case: WAIT_RESP
