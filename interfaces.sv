@@ -1,11 +1,12 @@
 `ifndef INTERFACES
   `define INTERFACES
+  `define DW 32
 
 interface master_if #(N=4);
   logic req[N], ack[N], cmd[N], resp[N];
   logic [31:0] addr[N];
-  logic [31:0] wdata[N];
-  logic [31:0] rdata[N];
+  logic [`DW-1:0] wdata[N];
+  logic [`DW-1:0] rdata[N];
 
   modport crossbar(input req, cmd, addr, wdata,
 		   output ack, resp, rdata);
@@ -17,8 +18,8 @@ endinterface // master_if
 interface slave_if #(N=4);
   logic 	     req[N], ack[N], cmd[N], resp[N];
   logic [31-$clog2(N):0] addr[N];
-  logic [31:0] 		 wdata[N];
-  logic [31:0] 		 rdata[N];
+  logic [`DW-1:0] 	 wdata[N];
+  logic [`DW-1:0] 	 rdata[N];
 
   modport crossbar (input ack, resp, rdata,
 		    output req, cmd, addr, wdata);

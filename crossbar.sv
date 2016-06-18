@@ -11,7 +11,7 @@ module crossbar
   typedef struct {
     logic 	 tx_valid;
     logic [31-$clog2(SLAVES):0] addr;
-    logic [31:0] 		data;
+    logic [`DW-1:0] 		data;
     logic 			cmd; // 0-read, 1-write
   } tx_type;
 
@@ -23,12 +23,16 @@ module crossbar
   // current transaction pointer for each slave
   logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES], rr_copy[SLAVES];
 
+  // tx validity for +1, +2, +3 steps for each slave
+  // is used to optimize (ex-)combinatorial-heavy update_rr()
+  logic 			next_tx_valid[SLAVES][1:3];
+  
   // set round-robin to next non-empty transaction
   function logic [$clog2(MASTERS)-1:0] update_rr (input int i); 
     priority case (1'b1)
-      tx_queue[i][rr_copy[i]+1].tx_valid: return rr_copy[i]+2'(1);
-      tx_queue[i][rr_copy[i]+2].tx_valid: return rr_copy[i]+2'(2);
-      tx_queue[i][rr_copy[i]+3].tx_valid: return rr_copy[i]+2'(3);
+      next_tx_valid[i][1]: return rr_copy[i]+2'(1);
+      next_tx_valid[i][2]: return rr_copy[i]+2'(2);
+      next_tx_valid[i][3]: return rr_copy[i]+2'(3);
       default: return rr_copy[i];
     endcase // priority case (1'b1)
   endfunction
@@ -36,7 +40,7 @@ module crossbar
   // table of slave responses for priority mux
   struct 			{
     logic 			ack, resp;
-    logic [31:0] 		rdata;
+    logic [`DW-1:0] 		rdata;
   } try[MASTERS][SLAVES];
   
 
@@ -93,7 +97,7 @@ module crossbar
 				       addr : mif.addr[i][31-$clog2(SLAVES):0]};
 
 	  // set rr_cnt if no transactions in queue for current slave
-	  for (int j=0; j<MASTERS; j++)
+	  for (int j=0; j<MASTERS; j++) // ### optimize time here ###
 	    slave_q_has_txs |= tx_queue[slave_addr][j].tx_valid;
 	  if (!slave_q_has_txs) rr_cnt[slave_addr] <= i;
 	  
@@ -128,7 +132,11 @@ module crossbar
 	      // save copy of transaction pointer in case rr_cnt gets
 	      // overwritten in transaction push phase
 	      rr_copy[i] <= rr_cnt[i];  
-	    end
+
+	      for (int j=1; j<=3; j++) // see next_tx_valid declaration
+		next_tx_valid[i][j] <= tx_queue[i][rr_cnt[i]+j].tx_valid;
+	      
+	    end // if (tx.tx_valid)
 	  end // case: READY
 	  
 	  WAIT_ACK: begin

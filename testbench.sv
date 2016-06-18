@@ -13,7 +13,9 @@ class Master_tx;
   rand bit 		cmd[M]; // 0-read, 1-write
   rand bit[$clog2(S)-1:0] slave_num[M];
   rand bit[31-$clog2(S):0] addr[M];
-  rand bit[31:0] wdata[M];
+  rand bit[`DW-1:0] wdata[M];
+
+  constraint c0 {foreach (cmd[i]) !cmd[i] -> wdata[i] == '0;}
 
   task drive(input int i);
     fork
@@ -24,13 +26,16 @@ class Master_tx;
       mif.wdata[i] = cmd[i] ? wdata[i] : 'x;
       @(posedge clk);
       mif.req[i] = 0;
+      repeat(5) @(posedge clk);
+      sif.ack[slave_num[i]] = 1;
+      @(posedge clk) sif.ack[slave_num[i]] = 0;
     end
     join_none
   endtask
 
   function void display();
-    foreach (enable[i])
-      $display("M%1d: en=%b--cmd=%b--slaveN=%d", i ,enable[i], cmd[i], slave_num[i]);
+    foreach (enable[i]) if (enable[i])
+      $display("%t: M%1d: cmd=%1b slaveN=%d wdata=%h", $time, i ,cmd[i], slave_num[i], wdata[i]);
   endfunction
   
 endclass // Master_tx
