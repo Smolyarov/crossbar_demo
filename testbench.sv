@@ -15,20 +15,23 @@ class Master_tx;
   rand bit[31-$clog2(S):0] addr[M];
   rand bit[31:0] wdata[M];
 
-  task drive();
-    foreach (enable[i]) begin
-      fork
-	if (enable[i]) begin
-	  mif.req[i] = 1;
-	  mif.cmd[i] = cmd;
-	  mif.addr[i] = {slave_num[i], addr[i]};
-	  mif.wdata[i] = cmd ? wdata[i] : 'x;
-	  @(posedge clk);
-	  mif.req[i] = 0;
-	end
-      join_none
+  task drive(input int i);
+    fork
+    if (enable[i]) begin
+      mif.req[i] = 1;
+      mif.cmd[i] = cmd[i];
+      mif.addr[i] = {slave_num[i], addr[i]};
+      mif.wdata[i] = cmd[i] ? wdata[i] : 'x;
+      @(posedge clk);
+      mif.req[i] = 0;
     end
+    join_none
   endtask
+
+  function void display();
+    foreach (enable[i])
+      $display("M%1d: en=%b--cmd=%b--slaveN=%d", i ,enable[i], cmd[i], slave_num[i]);
+  endfunction
   
 endclass // Master_tx
 
@@ -48,11 +51,17 @@ endclass // Master_tx
     repeat(10) @(posedge clk);
     reset();
 
-    repeat(10) begin
+    repeat(20) begin
+      
       assert(mtx.randomize());
-      mtx.drive();
+      mtx.display();
+      foreach (mif.req[i]) mtx.drive(i);
       repeat(10) @(posedge clk);
+     
     end
-  end
+  end // initial begin
+
+  final $display("final @%t", $time);
+  
   
 endprogram
