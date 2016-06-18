@@ -24,12 +24,12 @@ module crossbar
   logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES], rr_copy[SLAVES];
 
   // set round-robin to next non-empty transaction
-  function void update_rr (input int i); 
+  function logic [$clog2(MASTERS)-1:0] update_rr (input int i); 
     priority case (1'b1)
-      tx_queue[i][rr_copy[i]+1].tx_valid: rr_cnt[i] <= rr_copy[i]+2'(1);
-      tx_queue[i][rr_copy[i]+2].tx_valid: rr_cnt[i] <= rr_copy[i]+2'(2);
-      tx_queue[i][rr_copy[i]+3].tx_valid: rr_cnt[i] <= rr_copy[i]+2'(3);
-      default: rr_cnt[i] <= rr_copy[i];
+      tx_queue[i][rr_copy[i]+1].tx_valid: return rr_copy[i]+2'(1);
+      tx_queue[i][rr_copy[i]+2].tx_valid: return rr_copy[i]+2'(2);
+      tx_queue[i][rr_copy[i]+3].tx_valid: return rr_copy[i]+2'(3);
+      default: return rr_copy[i];
     endcase // priority case (1'b1)
   endfunction
   
@@ -138,7 +138,7 @@ module crossbar
 	      // if write, then we are done, if read, wait for response
 	      if (tx_queue[i][rr_copy[i]].cmd) begin
 		sif_state[i] <= READY;
-		update_rr(i);
+		rr_cnt[i] <= update_rr(i);
 	      end
 	      else sif_state[i] <= WAIT_RESP;
 	    end // if (sif.ack[i])
@@ -150,7 +150,7 @@ module crossbar
 	      try[rr_copy[i]][i].resp <= 1'b1;
 	      try[rr_copy[i]][i].rdata <= sif.rdata[i];
 	      sif_state[i] <= READY;
-	      update_rr(i);
+	      rr_cnt[i] <= update_rr(i);
 	    end // if (sif.resp[i])
 	    
 	  end // case: WAIT_RESP
