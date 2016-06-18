@@ -21,15 +21,15 @@ module crossbar
   enum logic[1:0] {READY, WAIT_ACK, WAIT_RESP} sif_state[SLAVES];
 
   // current transaction pointer for each slave
-  logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES];
+  logic [$clog2(MASTERS)-1:0] 	rr_cnt[SLAVES], rr_copy[SLAVES];
 
   // set round-robin to next non-empty transaction
   function void update_rr (input int i); 
     priority case (1'b1)
-      tx_queue[i][rr_cnt[i]+1].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(1);
-      tx_queue[i][rr_cnt[i]+2].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(2);
-      tx_queue[i][rr_cnt[i]+3].tx_valid: rr_cnt[i] <= rr_cnt[i]+2'(3);
-      default: rr_cnt[i] <= rr_cnt[i];
+      tx_queue[i][rr_copy[i]+1].tx_valid: rr_cnt[i] <= rr_copy[i]+2'(1);
+      tx_queue[i][rr_copy[i]+2].tx_valid: rr_cnt[i] <= rr_copy[i]+2'(2);
+      tx_queue[i][rr_copy[i]+3].tx_valid: rr_cnt[i] <= rr_copy[i]+2'(3);
+      default: rr_cnt[i] <= rr_copy[i];
     endcase // priority case (1'b1)
   endfunction
   
@@ -81,6 +81,7 @@ module crossbar
       for (int i=0; i<MASTERS; i++) begin // store master requests
 	
 	logic [$clog2(SLAVES)-1:0] slave_addr;
+	automatic logic 			   slave_q_has_txs = 0;
 	slave_addr = mif.addr[i][31:31-$clog2(SLAVES)+1];
 	
 	// if master requests, we check that corresponding master-to-slave
@@ -89,8 +90,14 @@ module crossbar
 	  tx_queue[slave_addr][i] <= '{tx_valid : 1'b1,
 				       data : mif.wdata[i],
 				       cmd : mif.cmd[i],
-				       addr : mif.addr[i][31-$clog2(SLAVES):0]};  
-	end 
+				       addr : mif.addr[i][31-$clog2(SLAVES):0]};
+
+	  // set rr_cnt if no transactions in queue for current slave
+	  for (int j=0; j<MASTERS; j++)
+	    slave_q_has_txs |= tx_queue[slave_addr][j].tx_valid;
+	  if (!slave_q_has_txs) rr_cnt[slave_addr] <= i;
+	  
+	end // if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid))
       end // for (int i=0; i<MASTERS; i++)
 
       
@@ -109,23 +116,27 @@ module crossbar
 	    tx_type tx;
 	    tx = tx_queue[i][rr_cnt[i]];
 	    
-	    if (tx.tx_valid) begin
+	    if (tx.tx_valid) begin // transaction pull
  	      sif.req[i] <= 1'b1;
 	      sif.cmd[i] <= tx.cmd;
 	      sif.addr[i] <= tx.addr;
 	      if (tx.cmd) sif.wdata[i] <= tx.data; // write
 	      sif_state[i] <= WAIT_ACK;
 	      
-	      tx_queue[i][rr_cnt[i]].tx_valid <= 0; // erase transaction 
+	      tx_queue[i][rr_cnt[i]].tx_valid <= 0; // erase transaction
+	      
+	      // save copy of transaction pointer in case rr_cnt gets
+	      // overwritten in transaction push phase
+	      rr_copy[i] <= rr_cnt[i];  
 	    end
 	  end // case: READY
 	  
 	  WAIT_ACK: begin
 	    if (sif.ack[i]) begin
-	      try[rr_cnt[i]][i].ack <= 1'b1;
+	      try[rr_copy[i]][i].ack <= 1'b1;
 	      
 	      // if write, then we are done, if read, wait for response
-	      if (tx_queue[i][rr_cnt[i]].cmd) begin
+	      if (tx_queue[i][rr_copy[i]].cmd) begin
 		sif_state[i] <= READY;
 		update_rr(i);
 	      end
@@ -136,8 +147,8 @@ module crossbar
 	  
 	  WAIT_RESP: begin
 	    if (sif.resp[i]) begin
-	      try[rr_cnt[i]][i].resp <= 1'b1;
-	      try[rr_cnt[i]][i].rdata <= sif.rdata[i];
+	      try[rr_copy[i]][i].resp <= 1'b1;
+	      try[rr_copy[i]][i].rdata <= sif.rdata[i];
 	      sif_state[i] <= READY;
 	      update_rr(i);
 	    end // if (sif.resp[i])
