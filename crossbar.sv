@@ -41,7 +41,7 @@ module crossbar
   struct 			{
     logic 			ack, resp;
     logic [`DW-1:0] 		rdata;
-  } try[MASTERS][SLAVES];
+    } try[MASTERS][SLAVES];
   
 
   
@@ -82,7 +82,10 @@ module crossbar
       
 
       
-      for (int i=0; i<MASTERS; i++) begin // store master requests
+      // store master requests:
+      // if no txs in queue for current slave,
+      // rr_cnt is set to a master with a lower number
+      for (int i=MASTERS-1; i>=0; i--) begin
 	
 	logic [$clog2(SLAVES)-1:0] slave_addr;
 	automatic logic 			   slave_q_has_txs = 0;
@@ -102,7 +105,7 @@ module crossbar
 	  if (!slave_q_has_txs) rr_cnt[slave_addr] <= i;
 	  
 	end // if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid))
-      end // for (int i=0; i<MASTERS; i++)
+      end // for (int i=MASTERS-1; i>=0; i--)
 
       
 
@@ -134,7 +137,7 @@ module crossbar
 	      rr_copy[i] <= rr_cnt[i];  
 
 	      for (int j=1; j<=3; j++) // see next_tx_valid declaration
-		next_tx_valid[i][j] <= tx_queue[i][rr_cnt[i]+j].tx_valid;
+		next_tx_valid[i][j] <= tx_queue[i][rr_cnt[i]+2'(j)].tx_valid;
 	      
 	    end // if (tx.tx_valid)
 	  end // case: READY
