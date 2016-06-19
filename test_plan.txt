@@ -1,0 +1,20 @@
+Assumptions:
+	Any slave can process one transaction at a time, for all slaves processing times are equal.
+	
+---------------------------------
+Reset behavior:
+	sif and mif outputs are zero the next cycle
+	
+One master sends tx to a slave (r/w):
+	verify that if master sends repeat tx to the same slave before ack for the 1st tx is returned, that repeat tx gets ignored
+
+Few masters send txs to the same slave (r/w) the same cycle:
+	!!! verify that if no txs in queue for the slave, rr_cnt sets to the master with the lowest number (line 100)
+	
+Few masters send txs to the same slave (r/w) on sequential cycles:
+	verify correct round-robin order
+	
+Few masters send txs to different slaves (r/w) the same cycle:
+
+One master sends a few txs(r) one after another to a few slaves:
+	verify that the return order is correct
