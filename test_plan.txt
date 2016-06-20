@@ -8,7 +8,7 @@ Assumptions:
 +One master sends tx to a slave (r/w):
 	verify that if master sends repeat tx to the same slave before ack for the 1st tx is returned, that repeat tx gets ignored
 
-Few masters send txs to the same slave (r/w) the same cycle:
++Few masters send txs to the same slave (r/w) the same cycle:
 	!!! verify that if no txs in queue for the slave, rr_cnt sets to the master with the lowest number (line 100)
 	
 Few masters send txs to the same slave (r/w) on sequential cycles:

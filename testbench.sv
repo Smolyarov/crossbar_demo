@@ -10,6 +10,8 @@ program automatic test #(M=4, S=4) //masters, slaves
    input logic clk,
    output logic rst);
 
+  typedef class Errors;
+  
 // Classes
 class Master_tx;
   rand bit 		enable[M];
@@ -23,7 +25,7 @@ class Master_tx;
   }
   
   constraint many_to_one {
-    enable.sum() with (8'(item)) inside {[2:M]};
+    enable.sum() with (8'(item)) inside {[M:M]};
     foreach (slave_num[i])
     if (i>0) slave_num[i]==slave_num[i-1];
   }
@@ -44,10 +46,11 @@ class Master_tx;
   }
 
   
-  task drive_mif(input int i, input semaphore sem);
+  task drive_mif(input int i, input semaphore sem, input Errors err);
     fork
       if (enable[i]) begin
 	sem.get(1);
+	err.mutex_cnt--;
 	$display("M%1d ##get mutex\t@%4t", i, $time);
         $display("M%1d req\t@%4t", i, $time);
         mif.req[i] = 1;
@@ -61,6 +64,7 @@ class Master_tx;
             $display("M%1d ack\t@%4t", i, $time);
             if (cmd[i]) begin
 	      sem.put(1);
+	      err.mutex_cnt++;
 	      $display("M%1d ##put mutex\t@%4t", i, $time);
 	      break; // if write, no need to wait for resp
 	    end
@@ -69,8 +73,13 @@ class Master_tx;
                 if (mif.resp[i]) begin
                   $display("M%1d resp\t@%4t", i, $time);
                   $display("M%1d got %h expected %h", i, mif.rdata[i], addr[i]);
+		  assert(mif.rdata[i]==addr[i]) else begin
+		    $error("rdata mismatch");
+		    err.data_err++;
+		  end
 
 		  sem.put(1);
+		  err.mutex_cnt++;
 		  $display("M%1d ##put mutex\t@%4t", i, $time);
                   break;
                 end
@@ -97,6 +106,21 @@ class Master_tx;
   endfunction
   
 endclass // Master_tx
+
+class Errors;
+  int data_err;
+  int mutex_cnt; // must be 0 if all ok
+
+  function new();
+    data_err = 0;
+    mutex_cnt = 0;
+  endfunction // new
+
+  function void print();
+    $display("TOTAL ERRORS: %0d", data_err);
+    $display("MUTEX CNT: %0d", mutex_cnt);
+  endfunction
+endclass
   
   // Test data
   
@@ -154,29 +178,35 @@ endclass // Master_tx
   
   initial begin
     Master_tx mtx;
+    Errors total_err;
 
     // mutex for each master
     // to ensure master waits to the end of transaction
     semaphore master_sem[M];
-    
+
+    total_err = new();
     reset();
 
     foreach (sif.req[i]) spawn_slave(i);
     foreach (master_sem[i]) master_sem[i] = new(1);
 
-    repeat(10) begin
+    repeat(5) begin
       mtx = new();
       mtx.constraint_mode(0);
-      mtx.one_to_one.constraint_mode(1);
+      mtx.many_to_one.constraint_mode(1);
       assert(mtx.randomize());
       mtx.print();
 
       foreach (mtx.enable[i])
-	if (mtx.enable[i]) mtx.drive_mif(i, master_sem[i]);
-      @(posedge clk);  
-    end // repeat (5)
+	if (mtx.enable[i]) mtx.drive_mif(i, master_sem[i], total_err);
+      repeat(1) @(posedge clk);  
+    end
     
-    #1000;
+    #10us;
+    $display("-----------------------------------------");
+    total_err.print();
+    $stop();
+    
   end // initial begin
   
   
