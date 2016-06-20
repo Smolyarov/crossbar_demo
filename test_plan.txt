@@ -24,4 +24,3 @@ One master sends a few txs(r) one after another to a few slaves:
 TODO:
 	each master in tb must block until transaction is complete
 	next_tx_valid[i] = 000 means no valid transactions ahead. wtf
-	bug with rr_cnt being set in tx store phase, then being overwritten to rr_copy in WACK or WRESP

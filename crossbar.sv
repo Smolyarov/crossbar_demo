@@ -33,7 +33,7 @@ module crossbar
       next_tx_valid[i][1]: return rr_copy[i]+2'(1);
       next_tx_valid[i][2]: return rr_copy[i]+2'(2);
       next_tx_valid[i][3]: return rr_copy[i]+2'(3);
-      default: return rr_copy[i];
+      default: return rr_cnt[i];
     endcase // priority case (1'b1)
   endfunction
   
