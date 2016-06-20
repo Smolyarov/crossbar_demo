@@ -35,10 +35,20 @@ class Master_tx;
     if (i!=j) slave_num[i] != slave_num[j]; // unique slave
   }
 
+  constraint reads_only {
+    foreach (cmd[i]) cmd[i] == 0;
+  }
+
+  constraint writes_only {
+    foreach (cmd[i]) cmd[i] == 1;
+  }
+
   
-  task drive_mif(input int i);
+  task drive_mif(input int i, input semaphore sem);
     fork
       if (enable[i]) begin
+	sem.get(1);
+	$display("M%1d ##get mutex\t@%4t", i, $time);
         $display("M%1d req\t@%4t", i, $time);
         mif.req[i] = 1;
         mif.cmd[i] = cmd[i];
@@ -49,17 +59,25 @@ class Master_tx;
         forever begin
           if (mif.ack[i]) begin
             $display("M%1d ack\t@%4t", i, $time);
-            if (cmd[i]) break; // if write, no need to wait for resp
-            else
+            if (cmd[i]) begin
+	      sem.put(1);
+	      $display("M%1d ##put mutex\t@%4t", i, $time);
+	      break; // if write, no need to wait for resp
+	    end
+            else begin
               forever begin
                 if (mif.resp[i]) begin
                   $display("M%1d resp\t@%4t", i, $time);
                   $display("M%1d got %h expected %h", i, mif.rdata[i], addr[i]);
+
+		  sem.put(1);
+		  $display("M%1d ##put mutex\t@%4t", i, $time);
                   break;
                 end
 		else @(posedge clk);
-              end
-	    
+              end // forever begin
+	      break;
+	    end // else: !if(cmd[i])
 	  end // if (mif.ack[i])
           else @(posedge clk);
 	  
@@ -136,12 +154,17 @@ endclass // Master_tx
   
   initial begin
     Master_tx mtx;
+
+    // mutex for each master
+    // to ensure master waits to the end of transaction
+    semaphore master_sem[M];
     
     reset();
 
     foreach (sif.req[i]) spawn_slave(i);
+    foreach (master_sem[i]) master_sem[i] = new(1);
 
-    repeat(5) begin
+    repeat(10) begin
       mtx = new();
       mtx.constraint_mode(0);
       mtx.one_to_one.constraint_mode(1);
@@ -149,8 +172,8 @@ endclass // Master_tx
       mtx.print();
 
       foreach (mtx.enable[i])
-	if (mtx.enable[i]) mtx.drive_mif(i);
-      repeat(5) @(posedge clk);  
+	if (mtx.enable[i]) mtx.drive_mif(i, master_sem[i]);
+      @(posedge clk);  
     end // repeat (5)
     
     #1000;
