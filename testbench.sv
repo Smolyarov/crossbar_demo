@@ -34,55 +34,44 @@ class Master_tx;
       foreach (slave_num[j])
         if (i!=j) slave_num[i] != slave_num[j]; // unique slave
   }
+
   
   task drive_mif(input int i);
     fork
       if (enable[i]) begin
-	mif.req[i] = 1;
-	mif.cmd[i] = cmd[i];
-	mif.addr[i] = {slave_num[i], addr[i]};
-	mif.wdata[i] = cmd[i] ? wdata[i] : 'x;
-	@(posedge clk);
-	mif.req[i] = 0;
-      end
+        $display("M%1d req\t@%4t", i, $time);
+        mif.req[i] = 1;
+        mif.cmd[i] = cmd[i];
+        mif.addr[i] = {slave_num[i], addr[i]};
+        mif.wdata[i] = cmd[i] ? wdata[i] : 'x;
+        @(posedge clk);
+        mif.req[i] = 0;
+        forever begin
+          if (mif.ack[i]) begin
+            $display("M%1d ack\t@%4t", i, $time);
+            if (cmd[i]) break; // if write, no need to wait for resp
+            else
+              forever begin
+                if (mif.resp[i]) begin
+                  $display("M%1d resp\t@%4t", i, $time);
+                  $display("M%1d got %h expected %h", i, mif.rdata[i], addr[i]);
+                  break;
+                end
+		else @(posedge clk);
+              end
+	    
+	  end // if (mif.ack[i])
+          else @(posedge clk);
+	  
+        end // forever begin
+	
+      end // if (enable[i])
     join_none
-  endtask
-
-  
-  task drive_sif(input int i);
-    bit cmd_int;
-    bit [31-$clog2(S):0] addr_int;
-    fork
-      forever begin
-        if (sif.req[i]) begin
-          
-          cmd_int = sif.cmd[i];
-          addr_int = sif.addr[i]; 
-          
-          repeat(`SLAVE_ACK_LAT) @(posedge clk);
-          sif.ack[i] = 1;
-          $display("ACK @%t", $time);
-          @(posedge clk) sif.ack[i] = 0;
-          
-          if (!cmd_int) begin // read operation
-            repeat(`SLAVE_RESP_LAT) @(posedge clk);
-            $display("RESP @%t", $time);
-            sif.resp[i] = 1;
-            sif.rdata[i] = addr_int;
-            @(posedge clk) sif.resp[i] = 0;
-            break;
-          end
-          else break;
-          
-        end // if (sif.req[i])
-        else @(posedge clk);
-      end // forever begin
-    join_none
-  endtask
+  endtask // drive_mif
 
   
   function void print();
-    $display("@%t ns: transaction", $time);
+    $display("@%4tns: transaction", $time);
     foreach (enable[i])
       if (enable[i])
         $display("M%1d->S%1d cmd:%1b addr:%h wdata:%h",
@@ -108,6 +97,41 @@ endclass // Master_tx
       $display("Reset OK");
   endtask
   
+  
+  task spawn_slave(input int i);  
+    bit cmd_int;
+    bit [31-$clog2(S):0] addr_int;
+    
+    fork
+      forever begin
+        if (sif.req[i]) begin
+          $display("S%1d req\t@%4t", i, $time);
+          
+          cmd_int = sif.cmd[i];
+          addr_int = sif.addr[i]; 
+          
+          repeat(`SLAVE_ACK_LAT) @(posedge clk);
+          sif.ack[i] = 1;
+          $display("S%1d ack\t@%4t", i, $time);
+          @(posedge clk) sif.ack[i] = 0;
+          
+          if (!cmd_int) begin // read operation
+            repeat(`SLAVE_RESP_LAT) @(posedge clk);
+            $display("S%1d resp\t@%4t", i, $time);
+            sif.resp[i] = 1;
+            sif.rdata[i] = addr_int; // for convenient checking
+            @(posedge clk) sif.resp[i] = 0;
+            continue;
+          end
+          else continue;
+          
+        end // if (sif.req[i])
+        else @(posedge clk);
+	
+      end // forever begin
+    join_none
+  endtask
+  
   // Tests
   
   initial begin
@@ -116,18 +140,16 @@ endclass // Master_tx
     mtx.constraint_mode(0);
     
     reset();
-    mtx.one_to_one.constraint_mode(1);
+    mtx.many_to_one.constraint_mode(1);
     mtx.randomize();
     mtx.print();
     foreach (mtx.enable[i])
-      if (mtx.enable[i]) begin
-        mtx.drive_mif(i);
-        mtx.drive_sif(mtx.slave_num[i]);
-      end
-    #100;
+      if (mtx.enable[i]) mtx.drive_mif(i);
+    foreach (sif.req[i]) spawn_slave(i);
+    #1000;
   end
   
   
 
-  final $display("EXIT @%t", $time);  
+  final $display("EXIT\t@%4t", $time);  
 endprogram
