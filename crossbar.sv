@@ -102,7 +102,10 @@ module crossbar
 	  // set rr_cnt if no transactions in queue for current slave
 	  for (int j=0; j<MASTERS; j++) // ### optimize time here ###
 	    slave_q_has_txs |= tx_queue[slave_addr][j].tx_valid;
-	  if (!slave_q_has_txs) rr_cnt[slave_addr] <= i;
+	  if (!slave_q_has_txs) begin
+	    rr_cnt[slave_addr] <= 2'(i);
+	    $display("@%t:tx_q slave %1d empty, write rr_cnt with %1d",$time,slave_addr,i);
+	  end
 	  
 	end // if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid))
       end // for (int i=MASTERS-1; i>=0; i--)

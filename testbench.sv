@@ -25,14 +25,14 @@ class Master_tx;
   constraint many_to_one {
     enable.sum() with (8'(item)) inside {[2:M]};
     foreach (slave_num[i])
-      if (i>0) slave_num[i]==slave_num[i-1];
+    if (i>0) slave_num[i]==slave_num[i-1];
   }
   
   constraint all_to_all {
     enable.sum() with (8'(item)) == M;
     foreach (slave_num[i])
-      foreach (slave_num[j])
-        if (i!=j) slave_num[i] != slave_num[j]; // unique slave
+    foreach (slave_num[j])
+    if (i!=j) slave_num[i] != slave_num[j]; // unique slave
   }
 
   
@@ -136,18 +136,25 @@ endclass // Master_tx
   
   initial begin
     Master_tx mtx;
-    mtx = new(); // !! each time create new tx
-    mtx.constraint_mode(0);
     
     reset();
-    mtx.many_to_one.constraint_mode(1);
-    mtx.randomize();
-    mtx.print();
-    foreach (mtx.enable[i])
-      if (mtx.enable[i]) mtx.drive_mif(i);
+
     foreach (sif.req[i]) spawn_slave(i);
+
+    repeat(5) begin
+      mtx = new();
+      mtx.constraint_mode(0);
+      mtx.one_to_one.constraint_mode(1);
+      assert(mtx.randomize());
+      mtx.print();
+
+      foreach (mtx.enable[i])
+	if (mtx.enable[i]) mtx.drive_mif(i);
+      repeat(5) @(posedge clk);  
+    end // repeat (5)
+    
     #1000;
-  end
+  end // initial begin
   
   
 
