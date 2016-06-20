@@ -41,7 +41,7 @@ module crossbar
   struct 			{
     logic 			ack, resp;
     logic [`DW-1:0] 		rdata;
-    } try[MASTERS][SLAVES];
+  } try[MASTERS][SLAVES];
   
 
   
@@ -104,7 +104,7 @@ module crossbar
 	    slave_q_has_txs |= tx_queue[slave_addr][j].tx_valid;
 	  if (!slave_q_has_txs) begin
 	    rr_cnt[slave_addr] <= 2'(i);
-	    $display("@%t:tx_q slave %1d empty, write rr_cnt with %1d",$time,slave_addr,i);
+	    $display("%m @%4t: tx_queue for slave %1d empty, rr_cnt <= %1d",$time,slave_addr,i);
 	  end
 	  
 	end // if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid))
@@ -120,6 +120,9 @@ module crossbar
 	  try[j][i].resp <= 0;
 	  try[j][i].rdata <= 0;
 	end
+
+	for (int j=1; j<=3; j++) // see next_tx_valid declaration
+	  next_tx_valid[i][j] <= tx_queue[i][rr_copy[i]+2'(j)].tx_valid;
 	
 	unique case (sif_state[i]) // slave FSMs
 	  READY: begin
@@ -139,9 +142,6 @@ module crossbar
 	      // overwritten in transaction push phase
 	      rr_copy[i] <= rr_cnt[i];  
 
-	      for (int j=1; j<=3; j++) // see next_tx_valid declaration
-		next_tx_valid[i][j] <= tx_queue[i][rr_cnt[i]+2'(j)].tx_valid;
-	      
 	    end // if (tx.tx_valid)
 	  end // case: READY
 	  
@@ -166,7 +166,6 @@ module crossbar
 	      sif_state[i] <= READY;
 	      rr_cnt[i] <= update_rr(i);
 	    end // if (sif.resp[i])
-	    
 	  end // case: WAIT_RESP
 	  
 	endcase // unique case (sif_state[i])	
