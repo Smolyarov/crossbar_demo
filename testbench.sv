@@ -45,58 +45,7 @@ class Master_tx;
     foreach (cmd[i]) cmd[i] == 1;
   }
 
-  
-  task drive_mif(input int i, input semaphore sem, input Errors err);
-    fork
-      if (enable[i]) begin
-	sem.get(1);
-	err.mutex_cnt--;
-	$display("M%1d ##get mutex\t@%4t", i, $time);
-        $display("M%1d req\t@%4t", i, $time);
-        mif.req[i] = 1;
-        mif.cmd[i] = cmd[i];
-        mif.addr[i] = {slave_num[i], addr[i]};
-        mif.wdata[i] = cmd[i] ? wdata[i] : 'x;
-        @(posedge clk);
-        mif.req[i] = 0;
-        forever begin
-          if (mif.ack[i]) begin
-            $display("M%1d ack\t@%4t", i, $time);
-            if (cmd[i]) begin
-	      sem.put(1);
-	      err.mutex_cnt++;
-	      $display("M%1d ##put mutex\t@%4t", i, $time);
-	      break; // if write, no need to wait for resp
-	    end
-            else begin
-              forever begin
-                if (mif.resp[i]) begin
-                  $display("M%1d resp\t@%4t", i, $time);
-                  $display("M%1d got %h expected %h", i, mif.rdata[i], addr[i]);
-		  assert(mif.rdata[i]==addr[i]) else begin
-		    $error("rdata mismatch");
-		    err.data_err++;
-		  end
 
-		  sem.put(1);
-		  err.mutex_cnt++;
-		  $display("M%1d ##put mutex\t@%4t", i, $time);
-                  break;
-                end
-		else @(posedge clk);
-              end // forever begin
-	      break;
-	    end // else: !if(cmd[i])
-	  end // if (mif.ack[i])
-          else @(posedge clk);
-	  
-        end // forever begin
-	
-      end // if (enable[i])
-    join_none
-  endtask // drive_mif
-
-  
   function void print();
     $display("@%4tns: transaction", $time);
     foreach (enable[i])
@@ -108,18 +57,18 @@ class Master_tx;
 endclass // Master_tx
 
 class Errors;
-  int data_err;
-  int mutex_cnt; // must be 0 if all ok
+  int 		data_err;
+  int 		tx_score; // 0-ok, <0-not all txs have completed
 
   function new();
     data_err = 0;
-    mutex_cnt = 0;
+    tx_score = 0;
   endfunction // new
 
   function void print();
     $display("TOTAL ERRORS: %0d", data_err);
-    $display("MUTEX CNT: %0d", mutex_cnt);
-  endfunction
+    $display("TX SCORE: %0d", tx_score);
+  endfunction // print
 endclass
   
   // Test data
@@ -137,7 +86,7 @@ endclass
     // test reset behavior
     assert(!(sif.req.or() || mif.ack.or() || mif.resp.or()))
       $display("Reset OK");
-  endtask
+  endtask // reset
   
   
   task spawn_slave(input int i);  
@@ -172,7 +121,64 @@ endclass
 	
       end // forever begin
     join_none
-  endtask
+  endtask // spawn_slave
+
+
+  task spawn_master(input int i, input mailbox #(Master_tx) mbx, input Errors err);
+    fork
+      Master_tx tx;
+
+      forever begin
+	mbx.peek(tx);
+	if (tx.enable[i]) begin
+	  err.tx_score--;
+	  $display("M%1d -----start\t@%4t", i, $time);
+          $display("M%1d req\t@%4t", i, $time);
+          mif.req[i] = 1;
+          mif.cmd[i] = tx.cmd[i];
+          mif.addr[i] = {tx.slave_num[i], tx.addr[i]};
+          mif.wdata[i] = tx.cmd[i] ? tx.wdata[i] : 'x;
+          @(posedge clk);
+          mif.req[i] = 0;
+          forever begin
+            if (mif.ack[i]) begin
+              $display("M%1d ack\t@%4t", i, $time);
+              if (tx.cmd[i]) begin
+		err.tx_score++;
+		$display("M%1d -----end\t@%4t", i, $time);
+		@(posedge clk);
+		break; // if write, no need to wait for resp
+	      end
+              else begin
+		forever begin
+                  if (mif.resp[i]) begin
+                    $display("M%1d resp\t@%4t", i, $time);
+                    $display("M%1d got %h expected %h", i, mif.rdata[i], tx.addr[i]);
+		    assert(mif.rdata[i]==tx.addr[i]) else begin
+		      $error("rdata mismatch");
+		      err.data_err++;
+		    end
+
+		    err.tx_score++;
+		    $display("M%1d -----end\t@%4t", i, $time);
+		    @(posedge clk);
+                    break;
+                  end
+		  else @(posedge clk);
+		end // forever begin
+		break;
+	      end // else: !if(cmd[i])
+	    end // if (mif.ack[i])
+            else @(posedge clk);
+	    
+          end // forever begin
+	  
+	end // if (tx.enable[i])
+	mbx.get(tx); // let put next transaction
+      end // forever begin
+    join_none
+  endtask // spawn_master
+  
   
   // Tests
   
@@ -180,29 +186,29 @@ endclass
     Master_tx mtx;
     Errors total_err;
 
-    // mutex for each master
-    // to ensure master waits to the end of transaction
-    semaphore master_sem[M];
+    mailbox #(Master_tx) master_mbx[M];
 
     total_err = new();
+    foreach (master_mbx[i]) master_mbx[i] = new(1);
+    
     reset();
 
     foreach (sif.req[i]) spawn_slave(i);
-    foreach (master_sem[i]) master_sem[i] = new(1);
+    foreach (mif.req[i]) spawn_master(i, master_mbx[i], total_err);
 
-    repeat(5) begin
+    repeat(50) begin
       mtx = new();
       mtx.constraint_mode(0);
-      mtx.many_to_one.constraint_mode(1);
+      mtx.one_to_one.constraint_mode(1);
       assert(mtx.randomize());
       mtx.print();
 
-      foreach (mtx.enable[i])
-	if (mtx.enable[i]) mtx.drive_mif(i, master_sem[i], total_err);
-      repeat(1) @(posedge clk);  
+      fork
+	foreach (mif.req[i]) master_mbx[i].put(mtx);
+      join
     end
     
-    #10us;
+    #20us;
     $display("-----------------------------------------");
     total_err.print();
     $stop();
