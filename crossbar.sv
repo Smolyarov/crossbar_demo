@@ -26,6 +26,9 @@ module crossbar
   // tx validity for +1, +2, +3 steps for each slave
   // is used to optimize (ex-)combinatorial-heavy update_rr()
   logic 			next_tx_valid[SLAVES][1:3];
+
+  // synchronous flags to improve timing
+  logic 			slave_q_has_txs[SLAVES];
   
   // set round-robin to next non-empty transaction
   function logic [$clog2(MASTERS)-1:0] update_rr (input int i); 
@@ -50,7 +53,10 @@ module crossbar
 
     
     if (rst) begin
-      for (int i=0; i<SLAVES; i++) rr_cnt[i] <= 0;
+      for (int i=0; i<SLAVES; i++) begin
+	rr_cnt[i] <= 0;
+	slave_q_has_txs[i] <= 0;
+      end
 
       for (int i=0; i<SLAVES; i++)
 	for (int j=0; j<MASTERS; j++) tx_queue[i][j].tx_valid <= 0;
@@ -81,6 +87,7 @@ module crossbar
     else begin
       
 
+      
       for (int i=0; i<SLAVES; i++) begin // slave operations
 	// defaults
 	sif.req[i] <= 0;
@@ -141,6 +148,34 @@ module crossbar
       end // for (int i=0; i<SLAVES; i++)
 
 
+
+      
+      for (int i=0; i<SLAVES; i++) begin // slave_q_has_txs driver
+	automatic logic temp_or = 0;
+	automatic int temp_sum = 0;
+	
+	for (int j=0; j<MASTERS; j++)
+	  temp_or |= tx_queue[i][j].tx_valid;
+	
+	slave_q_has_txs[i] <= temp_or;
+
+	// 1.if pull phase pulls the last transaction
+	for (int j=0; j<MASTERS; j++)
+	  temp_sum += tx_queue[i][j].tx_valid;
+
+	if (sif_state[i]==READY && temp_sum==1 && tx_queue[i][rr_cnt[i]].tx_valid)
+	  slave_q_has_txs[i] <= 0; // last tx in queue erased
+
+	// 2.if push phase (very important that goes after 1.)
+	for (int j=0; j<MASTERS; j++)
+	  if (mif.req[j] &&
+	      !(tx_queue[i][j].tx_valid) &&
+	      i == mif.addr[j][31:31-$clog2(SLAVES)+1])
+	    slave_q_has_txs[i] <= 1'b1; // not empty
+      end // for (int i=0; i<SLAVES; i++)
+
+      
+      
       
       // store master requests:
       // if no txs in queue for current slave,
@@ -148,11 +183,10 @@ module crossbar
       for (int i=MASTERS-1; i>=0; i--) begin
 	
 	logic [$clog2(SLAVES)-1:0] slave_addr;
-	automatic logic 			   slave_q_has_txs = 0;
 	slave_addr = mif.addr[i][31:31-$clog2(SLAVES)+1];
 	
 	// if master requests, we check that corresponding master-to-slave
-	// transaction cell is empty and push the transaction, else ignore it
+	// transaction cell is empty and PUSH the transaction, else ignore it
 	if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid)) begin
 	  tx_queue[slave_addr][i] <= '{tx_valid : 1'b1,
 				       data : mif.wdata[i],
@@ -160,9 +194,7 @@ module crossbar
 				       addr : mif.addr[i][31-$clog2(SLAVES):0]};
 
 	  // set rr_cnt if no transactions in queue for current slave
-	  for (int j=0; j<MASTERS; j++) // ### optimize time here ###
-	    slave_q_has_txs |= tx_queue[slave_addr][j].tx_valid;
-	  if (!slave_q_has_txs) begin
+	  if (!slave_q_has_txs[slave_addr]) begin
 	    rr_cnt[slave_addr] <= 2'(i);
 	    $display("%m @%4t: tx_queue for slave %1d empty, rr_cnt <= %1d",$time,slave_addr,i);
 	  end
@@ -171,6 +203,7 @@ module crossbar
       end // for (int i=MASTERS-1; i>=0; i--)
 
 
+      
       
       for (int i=0; i<MASTERS; i++) begin // drive slave responses to masters
 	// defaults

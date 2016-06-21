@@ -11,13 +11,10 @@ Assumptions:
 +Few masters send txs to the same slave (r/w) the same cycle:
 	!!! verify that if no txs in queue for the slave, rr_cnt sets to the master with the lowest number (line 100)
 	
-Few masters send txs to the same slave (r/w) on sequential cycles:
++Few masters send txs to the same slave (r/w) on sequential cycles:
 	verify correct round-robin order
 	
-Few masters send txs to different slaves (r/w) the same cycle:
-
-One master sends a few txs(r) one after another to a few slaves:
-	verify that the return order is correct
++Few masters send txs to different slaves (r/w) the same cycle:
 
 ---------------------------------------
 
