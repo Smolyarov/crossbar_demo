@@ -81,37 +81,6 @@ module crossbar
     else begin
       
 
-      
-      // store master requests:
-      // if no txs in queue for current slave,
-      // rr_cnt is set to a master with a lower number
-      for (int i=MASTERS-1; i>=0; i--) begin
-	
-	logic [$clog2(SLAVES)-1:0] slave_addr;
-	automatic logic 			   slave_q_has_txs = 0;
-	slave_addr = mif.addr[i][31:31-$clog2(SLAVES)+1];
-	
-	// if master requests, we check that corresponding master-to-slave
-	// transaction cell is empty and push the transaction, else ignore it
-	if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid)) begin
-	  tx_queue[slave_addr][i] <= '{tx_valid : 1'b1,
-				       data : mif.wdata[i],
-				       cmd : mif.cmd[i],
-				       addr : mif.addr[i][31-$clog2(SLAVES):0]};
-
-	  // set rr_cnt if no transactions in queue for current slave
-	  for (int j=0; j<MASTERS; j++) // ### optimize time here ###
-	    slave_q_has_txs |= tx_queue[slave_addr][j].tx_valid;
-	  if (!slave_q_has_txs) begin
-	    rr_cnt[slave_addr] <= 2'(i);
-	    $display("%m @%4t: tx_queue for slave %1d empty, rr_cnt <= %1d",$time,slave_addr,i);
-	  end
-	  
-	end // if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid))
-      end // for (int i=MASTERS-1; i>=0; i--)
-
-      
-
       for (int i=0; i<SLAVES; i++) begin // slave operations
 	// defaults
 	sif.req[i] <= 0;
@@ -170,6 +139,36 @@ module crossbar
 	  
 	endcase // unique case (sif_state[i])	
       end // for (int i=0; i<SLAVES; i++)
+
+
+      
+      // store master requests:
+      // if no txs in queue for current slave,
+      // rr_cnt is set to a master with a lower number
+      for (int i=MASTERS-1; i>=0; i--) begin
+	
+	logic [$clog2(SLAVES)-1:0] slave_addr;
+	automatic logic 			   slave_q_has_txs = 0;
+	slave_addr = mif.addr[i][31:31-$clog2(SLAVES)+1];
+	
+	// if master requests, we check that corresponding master-to-slave
+	// transaction cell is empty and push the transaction, else ignore it
+	if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid)) begin
+	  tx_queue[slave_addr][i] <= '{tx_valid : 1'b1,
+				       data : mif.wdata[i],
+				       cmd : mif.cmd[i],
+				       addr : mif.addr[i][31-$clog2(SLAVES):0]};
+
+	  // set rr_cnt if no transactions in queue for current slave
+	  for (int j=0; j<MASTERS; j++) // ### optimize time here ###
+	    slave_q_has_txs |= tx_queue[slave_addr][j].tx_valid;
+	  if (!slave_q_has_txs) begin
+	    rr_cnt[slave_addr] <= 2'(i);
+	    $display("%m @%4t: tx_queue for slave %1d empty, rr_cnt <= %1d",$time,slave_addr,i);
+	  end
+	  
+	end // if (mif.req[i] && !(tx_queue[slave_addr][i].tx_valid))
+      end // for (int i=MASTERS-1; i>=0; i--)
 
 
       
