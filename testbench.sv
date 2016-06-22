@@ -1,8 +1,10 @@
 `timescale 1ns/1ns
 `include "interfaces.sv"
 
-`define SLAVE_ACK_LAT 2
-`define SLAVE_RESP_LAT 2
+`define ACK_LAT_MIN 1
+`define ACK_LAT_MAX 3
+`define RESP_LAT_MIN 2
+`define RESP_LAT_MAX 6
 
 program automatic test #(M=4, S=4) //masters, slaves
   (master_if.tb mif,
@@ -10,9 +12,9 @@ program automatic test #(M=4, S=4) //masters, slaves
    input logic clk,
    output logic rst);
 
-  typedef class Errors;
+  typedef class Report;
   
-// Classes
+  // Classes
 class Master_tx;
   rand bit 		enable[M];
   rand bit 		cmd[M]; // 0-read, 1-write
@@ -25,16 +27,16 @@ class Master_tx;
   }
   
   constraint many_to_one {
-    enable.sum() with (8'(item)) inside {[M:M]};
+    enable.sum() with (8'(item)) inside {[2:M]};
     foreach (slave_num[i])
-    if (i>0) slave_num[i]==slave_num[i-1];
+      if (i>0) slave_num[i]==slave_num[i-1];
   }
   
   constraint all_to_all {
     enable.sum() with (8'(item)) == M;
     foreach (slave_num[i])
-    foreach (slave_num[j])
-    if (i!=j) slave_num[i] != slave_num[j]; // unique slave
+      foreach (slave_num[j])
+	if (i!=j) slave_num[i] != slave_num[j]; // unique slave
   }
 
   constraint reads_only {
@@ -56,26 +58,31 @@ class Master_tx;
   
 endclass // Master_tx
 
-class Errors;
+class Report;
   int 		data_err;
   int 		tx_score; // 0-ok, <0-not all txs have completed
+  int 		tx_total;
+  int 		tx_masters[M], tx_slaves[M];
 
   function new();
     data_err = 0;
     tx_score = 0;
+    tx_total = 0;
+    foreach (tx_masters[i]) tx_masters[i] = 0;
+    foreach (tx_slaves[i]) tx_slaves[i] = 0;
   endfunction // new
 
   function void print();
-    $display("TOTAL ERRORS: %0d", data_err);
+    $display("TOTAL TRANSACTIONS: %0d", tx_total);
+    foreach (tx_masters[i]) $write("M%0d:%0d ", i, tx_masters[i]);
+    $display();
+    foreach (tx_slaves[i]) $write("S%0d:%0d ", i, tx_slaves[i]);
+    $display();
+    $display("TOTAL DATA ERRORS: %0d", data_err);
     $display("TX SCORE: %0d", tx_score);
   endfunction // print
 endclass
   
-  // Test data
-  
-  // Properties
-  
-  // Assertions
   
   // Tasks and functions
   
@@ -101,13 +108,13 @@ endclass
           cmd_int = sif.cmd[i];
           addr_int = sif.addr[i]; 
           
-          repeat(`SLAVE_ACK_LAT) @(posedge clk);
+          repeat($urandom_range(`ACK_LAT_MIN,`ACK_LAT_MAX)) @(posedge clk);
           sif.ack[i] = 1;
           $display("S%1d ack\t@%4t", i, $time);
           @(posedge clk) sif.ack[i] = 0;
           
           if (!cmd_int) begin // read operation
-            repeat(`SLAVE_RESP_LAT) @(posedge clk);
+            repeat($urandom_range(`RESP_LAT_MIN,`RESP_LAT_MAX)) @(posedge clk);
             $display("S%1d resp\t@%4t", i, $time);
             sif.resp[i] = 1;
             sif.rdata[i] = addr_int; // for convenient checking
@@ -124,14 +131,17 @@ endclass
   endtask // spawn_slave
 
 
-  task spawn_master(input int i, input mailbox #(Master_tx) mbx, input Errors err);
+  task spawn_master(input int i, input mailbox #(Master_tx) mbx, input Report rpt);
     fork
       Master_tx tx;
 
       forever begin
 	mbx.peek(tx);
 	if (tx.enable[i]) begin
-	  err.tx_score--;
+	  rpt.tx_score--;
+	  rpt.tx_total++;
+	  rpt.tx_masters[i]++;
+	  rpt.tx_slaves[tx.slave_num[i]]++;
 	  $display("M%1d -----start\t@%4t", i, $time);
           $display("M%1d req\t@%4t", i, $time);
           mif.req[i] = 1;
@@ -144,7 +154,7 @@ endclass
             if (mif.ack[i]) begin
               $display("M%1d ack\t@%4t", i, $time);
               if (tx.cmd[i]) begin
-		err.tx_score++;
+		rpt.tx_score++;
 		$display("M%1d -----end\t@%4t", i, $time);
 		@(posedge clk);
 		break; // if write, no need to wait for resp
@@ -156,10 +166,10 @@ endclass
                     $display("M%1d got %h expected %h", i, mif.rdata[i], tx.addr[i]);
 		    assert(mif.rdata[i]==tx.addr[i]) else begin
 		      $error("rdata mismatch");
-		      err.data_err++;
+		      rpt.data_err++;
 		    end
 
-		    err.tx_score++;
+		    rpt.tx_score++;
 		    $display("M%1d -----end\t@%4t", i, $time);
 		    @(posedge clk);
                     break;
@@ -184,22 +194,23 @@ endclass
   
   initial begin
     Master_tx mtx;
-    Errors total_err;
+    Report rpt_final;
 
     mailbox #(Master_tx) master_mbx[M];
 
-    total_err = new();
+    rpt_final = new();
     foreach (master_mbx[i]) master_mbx[i] = new(1);
     
     reset();
 
     foreach (sif.req[i]) spawn_slave(i);
-    foreach (mif.req[i]) spawn_master(i, master_mbx[i], total_err);
+    foreach (mif.req[i]) spawn_master(i, master_mbx[i], rpt_final);
 
-    repeat(50) begin
+    repeat(5) begin
       mtx = new();
       mtx.constraint_mode(0);
-      mtx.one_to_one.constraint_mode(1);
+      mtx.many_to_one.constraint_mode(1);
+      mtx.reads_only.constraint_mode(1);
       assert(mtx.randomize());
       mtx.print();
 
@@ -208,9 +219,9 @@ endclass
       join
     end
     
-    #20us;
+    #1us;
     $display("-----------------------------------------");
-    total_err.print();
+    rpt_final.print();
     $stop();
     
   end // initial begin
