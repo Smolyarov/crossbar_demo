@@ -6,6 +6,8 @@
 `define RESP_LAT_MIN 2
 `define RESP_LAT_MAX 6
 
+`define NUM_TESTS 10
+
 program automatic test #(M=4, S=4) //masters, slaves
   (master_if.tb mif,
    slave_if.tb sif,
@@ -188,7 +190,30 @@ endclass
       end // forever begin
     join_none
   endtask // spawn_master
-  
+
+
+  task run_test(ref Master_tx mtx, ref mailbox #(Master_tx) mbx[M], input int constr);
+    repeat(`NUM_TESTS) begin
+      mtx = new();
+      mtx.constraint_mode(0);
+      
+      unique case (constr)
+	1: mtx.one_to_one.constraint_mode(1);
+	2: mtx.many_to_one.constraint_mode(1);
+	3: mtx.all_to_all.constraint_mode(1);
+	4: mtx.reads_only.constraint_mode(1);
+	5: mtx.writes_only.constraint_mode(1);
+	default: mtx.constraint_mode(0);
+      endcase
+      
+      assert(mtx.randomize());
+      mtx.print();
+
+      fork
+	foreach (mif.req[i]) mbx[i].put(mtx);
+      join
+    end // repeat (`NUM_TESTS)
+  endtask
   
   // Tests
   
@@ -206,18 +231,8 @@ endclass
     foreach (sif.req[i]) spawn_slave(i);
     foreach (mif.req[i]) spawn_master(i, master_mbx[i], rpt_final);
 
-    repeat(5) begin
-      mtx = new();
-      mtx.constraint_mode(0);
-      mtx.many_to_one.constraint_mode(1);
-      mtx.reads_only.constraint_mode(1);
-      assert(mtx.randomize());
-      mtx.print();
-
-      fork
-	foreach (mif.req[i]) master_mbx[i].put(mtx);
-      join
-    end
+    for (int i=0; i<=5; i++)
+      run_test(mtx, master_mbx, i);
     
     #1us;
     $display("-----------------------------------------");
